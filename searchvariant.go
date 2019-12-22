@@ -3,7 +3,6 @@ package addressparser
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -45,7 +44,7 @@ type SearchVariant struct {
 	addressParts []string
 }
 
-func Parse(address string) []*SearchVariant {
+func (search *SearchVariant) Parse(address string) []*SearchVariant {
 	firstResult := &SearchVariant{}
 	firstResult.addressParts = strings.FieldsFunc(address, defaultAddressSplitters)
 
@@ -62,10 +61,8 @@ func Parse(address string) []*SearchVariant {
 			subStrings := splitProbablyDelimiters(part)
 			for subIndex := range subStrings {
 				clone := result[index].clone()
-				clone.addressParts[partIndex] = fmt.Sprintf("%s0%s", ProbablyDelimiters, subIndex)
-				clone.addressParts = append(
-					clone.addressParts[:partIndex+1],
-					fmt.Sprintf("%s%d%d", ProbablyDelimiters, subIndex, len(subStrings)))
+				clone.addressParts[partIndex] = asString(subStrings, ProbablyDelimiters, 0, subIndex)
+				insert(partIndex + 1, asString(subStrings, ProbablyDelimiters, subIndex, len(subStrings)), &clone.addressParts)
 				clone.trimJunkWords()
 				clone.splitDigitalAndLetter()
 				isDuplicate := false
@@ -89,23 +86,14 @@ func Parse(address string) []*SearchVariant {
 	return result
 }
 
-func isNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
-}
-
-func (sv *SearchVariant) splitHyphens() {
-	for index := len(sv.addressParts) - 1; index >= 0; index-- {
-		subStrings := strings.FieldsFunc(sv.addressParts[index], defaultHyphens)
+func (search *SearchVariant) splitHyphens() {
+	for index := len(search.addressParts) - 1; index >= 0; index-- {
+		subStrings := strings.FieldsFunc(search.addressParts[index], defaultHyphens)
 
 		for subIndex := len(subStrings) - 1; subIndex > 0; subIndex-- {
 			if isNumeric(subStrings[subIndex]) {
-				sv.addressParts = append(
-					sv.addressParts[:index+1],
-					append(
-						[]string{subStrings[subIndex]}, sv.addressParts[index+1:]...)...,
-				)
-				sv.addressParts[index] = fmt.Sprintf("%s0%d", DefaultHyphens, subIndex)
+				insert(index + 1, subStrings[subIndex], &search.addressParts)
+				search.addressParts[index] = asString(subStrings, DefaultHyphens, 0, subIndex)
 			} else {
 				break
 			}
@@ -113,16 +101,16 @@ func (sv *SearchVariant) splitHyphens() {
 	}
 }
 
-func (sv *SearchVariant) trim() {
-	trimmed := make([]string, len(sv.addressParts))
-	for _, part := range sv.addressParts {
+func (search *SearchVariant) trim() {
+	trimmed := make([]string, len(search.addressParts))
+	for _, part := range search.addressParts {
 		trimmed = append(trimmed, strings.Trim(part, " "))
 	}
 }
 
-func (sv *SearchVariant) clone() *SearchVariant {
-	addressParts := make([]string, len(sv.addressParts))
-	copy(addressParts, sv.addressParts)
+func (search *SearchVariant) clone() *SearchVariant {
+	addressParts := make([]string, len(search.addressParts))
+	copy(addressParts, search.addressParts)
 	clone := &SearchVariant{
 		addressParts: addressParts,
 	}
@@ -169,30 +157,30 @@ func isJunkWords(word string) bool {
 	return ok
 }
 
-func (sv *SearchVariant) trimJunkWords() {
-	for index, part := range sv.addressParts {
+func (search *SearchVariant) trimJunkWords() {
+	for index, part := range search.addressParts {
 		if isJunkWords(part) {
-			sv.addressParts = append(sv.addressParts[:index], sv.addressParts[index+1:]...)
+			search.addressParts = append(search.addressParts[:index], search.addressParts[index+1:]...)
 		}
 	}
 }
 
-func (sv *SearchVariant) toString() string {
+func (search *SearchVariant) toString() string {
 	var sb strings.Builder
 	sep := ""
-	for _, part := range sv.addressParts {
+	for _, part := range search.addressParts {
 		_, _ = fmt.Fprintf(&sb, "%s[%s]", sep, part)
 		sep = " "
 	}
 	return sb.String()
 }
 
-func (sv *SearchVariant) equals(other *SearchVariant) bool {
-	if len(sv.addressParts) != len(other.addressParts) {
+func (search *SearchVariant) equals(other *SearchVariant) bool {
+	if len(search.addressParts) != len(other.addressParts) {
 		return false
 	}
 
-	for i, v := range sv.addressParts {
+	for i, v := range search.addressParts {
 		if v != other.addressParts[i] {
 			return false
 		}
@@ -200,25 +188,21 @@ func (sv *SearchVariant) equals(other *SearchVariant) bool {
 	return true
 }
 
-func (sv *SearchVariant) splitDigitalAndLetter() {
-	for index, part := range sv.addressParts {
+func (search *SearchVariant) splitDigitalAndLetter() {
+	for index, part := range search.addressParts {
 		asRunes := []rune(part)
 		beforeLastSymbol := string(asRunes[:len(asRunes)-2])
 		symbol := string(asRunes[len(asRunes)-2:])
 		if isNumeric(beforeLastSymbol) && isNumeric(symbol) {
-			sv.addressParts[index] = beforeLastSymbol
-			sv.addressParts = append(
-				sv.addressParts[:index+1],
-				append(
-					[]string{symbol}, sv.addressParts[index+1:]...)...,
-			) // addressParts.Insert(index+1, symbol)
+			search.addressParts[index] = beforeLastSymbol
+			insert(index + 1, symbol, &search.addressParts)
 		}
 	}
 }
 
-func (sv *SearchVariant) getRank() float64 {
+func (search *SearchVariant) getRank() float64 {
 	var rank float64
-	for _, part := range sv.addressParts {
+	for _, part := range search.addressParts {
 		partRank := float64(len(part) * len(part))
 		for _, subPart := range splitProbablyDelimiters(part) {
 			if isJunkWords(subPart) {
@@ -228,8 +212,4 @@ func (sv *SearchVariant) getRank() float64 {
 		rank += partRank
 	}
 	return rank
-}
-
-func main() {
-	return
 }
